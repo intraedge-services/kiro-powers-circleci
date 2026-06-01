@@ -35,10 +35,31 @@ Then reload:
 source ~/.zshrc
 ```
 
-### Step 3: Configure the MCP Server in Kiro
+### Step 3: Install the Power
 
-Add the following to `.kiro/settings/mcp.json` in your workspace (create the file if it doesn't exist):
+**Option A — Automated (recommended):**
 
+```bash
+# Clone the power repo
+git clone https://github.com/intraedge-services/kiro-powers-circleci.git
+
+# Run the install script pointing to your target workspace
+./kiro-powers-circleci/install.sh /path/to/your-project
+```
+
+This will:
+- Copy power files to `.kiro/powers/kiro-powers-circleci/`
+- Create `.kiro/settings/mcp.json` with the CircleCI server config
+- Verify your `CIRCLECI_TOKEN` is set
+
+**Option B — Manual:**
+
+1. Copy the power into your workspace:
+```bash
+cp -r kiro-powers-circleci/ /path/to/your-project/.kiro/powers/kiro-powers-circleci/
+```
+
+2. Create `.kiro/settings/mcp.json` in your workspace:
 ```json
 {
   "mcpServers": {
@@ -61,30 +82,16 @@ Add the following to `.kiro/settings/mcp.json` in your workspace (create the fil
 }
 ```
 
+> **Note**: If `.kiro/settings/mcp.json` already exists, merge the `circleci` entry into the existing `mcpServers` object.
+
 > **Note**: `autoApprove` lists read-only tools that won't prompt for confirmation. Remove tools from this list if you prefer manual approval for all actions.
 
 ### Step 4: Verify the MCP Server is Running
 
-1. Open Kiro IDE
+1. Open Kiro IDE (or reload window)
 2. Open the Command Palette and search for **MCP**
 3. Check that the `circleci` server shows as **Connected**
 4. Alternatively, ask Kiro: *"List my followed CircleCI projects"*
-
-### Step 5: Install Steering Files (Optional)
-
-Copy the steering files to your project for context-aware guidance:
-
-```bash
-cp -r steering/ /path/to/your-project/.kiro/steering/
-```
-
-### Step 6: Install Hooks (Optional)
-
-Copy hooks for automated config validation:
-
-```bash
-cp hooks/*.json /path/to/your-project/.kiro/hooks/
-```
 
 ## Quick Test Commands
 
@@ -167,9 +174,12 @@ Once installed, try these in Kiro chat to verify everything works:
 ```
 kiro-powers-circleci/
 ├── .gitignore
-├── package.json              # Power metadata + MCP server configuration
+├── package.json              # Power metadata + MCP server declaration
 ├── POWER.md                  # Detailed power documentation
 ├── README.md                 # This file
+├── install.sh                # Automated install script
+├── config/
+│   └── mcp.json              # MCP config to copy into target workspace
 ├── hooks/
 │   ├── validate-config-on-edit.json
 │   └── check-pipeline-on-push.json
