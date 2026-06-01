@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "circleci": {
+      "command": "npx",
+      "args": ["-y", "@circleci/mcp-server-circleci"],
+      "env": {
+        "CIRCLECI_TOKEN": "${CIRCLECI_TOKEN}",
+        "CIRCLECI_BASE_URL": "https://circleci.com"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "list_followed_projects",
+        "get_latest_pipeline_status",
+        "config_helper",
+        "get_job_test_results"
+      ]
+    }
+  }
+}
