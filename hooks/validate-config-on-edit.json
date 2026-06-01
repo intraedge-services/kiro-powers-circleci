@@ -1,0 +1,13 @@
+{
+  "name": "Validate CircleCI Config on Edit",
+  "version": "1.0.0",
+  "description": "Automatically validates the CircleCI configuration file when it is edited, using the official CircleCI MCP config_helper tool.",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [".circleci/config.yml", ".circleci/config.yml.bak"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "The CircleCI config file was just edited. Read the full contents of .circleci/config.yml and use the CircleCI MCP server's config_helper tool to validate it. If there are errors, report them clearly and suggest fixes. If the config is valid, confirm it passes validation."
+  }
+}

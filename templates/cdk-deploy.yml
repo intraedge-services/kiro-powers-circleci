@@ -1,0 +1,122 @@
+# Template: CDK Synth + Deploy Pipeline
+# Minimal pipeline for CDK infrastructure deployment with OIDC
+#
+# Features:
+# - OIDC authentication (no static keys)
+# - CDK synth → deploy flow
+# - Multi-environment support
+# - Approval gates for non-sandbox
+
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1
+
+parameters:
+  target-env:
+    type: string
+    default: "sandbox"
+
+executors:
+  cdk:
+    docker:
+      - image: cimg/python:3.11-node
+    resource_class: medium
+
+commands:
+  aws-oidc-auth:
+    steps:
+      - aws-cli/setup:
+          role_arn: "${CIRCLECI_ROLE_ARN}"
+          role_session_name: "circleci-${CIRCLE_BUILD_NUM}"
+          region: "${AWS_REGION:-us-east-1}"
+
+  setup-cdk:
+    steps:
+      - restore_cache:
+          keys:
+            - cdk-deps-v1-{{ checksum "pyproject.toml" }}
+      - run:
+          name: Install CDK and Python deps
+          command: |
+            sudo npm install -g aws-cdk
+            pip install --upgrade pip
+            pip install -e ".[cdk,aws]"
+      - save_cache:
+          key: cdk-deps-v1-{{ checksum "pyproject.toml" }}
+          paths:
+            - ~/.cache/pip
+            - ~/.local/lib
+            - ~/.npm
+
+jobs:
+  cdk-synth:
+    executor: cdk
+    steps:
+      - checkout
+      - setup-cdk
+      - aws-oidc-auth
+      - run:
+          name: CDK synth
+          working_directory: infrastructure/cdk
+          command: cdk synth -c env=<< pipeline.parameters.target-env >>
+      - persist_to_workspace:
+          root: infrastructure/cdk
+          paths:
+            - cdk.out
+
+  cdk-diff:
+    executor: cdk
+    steps:
+      - checkout
+      - setup-cdk
+      - aws-oidc-auth
+      - run:
+          name: CDK diff
+          working_directory: infrastructure/cdk
+          command: cdk diff -c env=<< pipeline.parameters.target-env >>
+
+  cdk-deploy:
+    executor: cdk
+    steps:
+      - checkout
+      - setup-cdk
+      - attach_workspace:
+          at: infrastructure/cdk
+      - aws-oidc-auth
+      - run:
+          name: CDK deploy
+          working_directory: infrastructure/cdk
+          command: |
+            cdk deploy \
+              -c env=<< pipeline.parameters.target-env >> \
+              --require-approval never \
+              --app cdk.out
+
+  cdk-destroy:
+    executor: cdk
+    steps:
+      - checkout
+      - setup-cdk
+      - aws-oidc-auth
+      - run:
+          name: CDK destroy
+          working_directory: infrastructure/cdk
+          command: cdk destroy -c env=<< pipeline.parameters.target-env >> --force
+
+workflows:
+  deploy:
+    jobs:
+      - cdk-synth:
+          context: pipeline-<< pipeline.parameters.target-env >>
+      - cdk-diff:
+          context: pipeline-<< pipeline.parameters.target-env >>
+      - hold-deploy:
+          type: approval
+          requires:
+            - cdk-synth
+            - cdk-diff
+      - cdk-deploy:
+          context: pipeline-<< pipeline.parameters.target-env >>
+          requires:
+            - hold-deploy
