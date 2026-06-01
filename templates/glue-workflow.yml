@@ -62,7 +62,7 @@ jobs:
             if [ -n "<< pipeline.parameters.scripts-bucket >>" ]; then
               BUCKET="<< pipeline.parameters.scripts-bucket >>"
             else
-              BUCKET="${SCRIPTS_BUCKET:-cos-<< pipeline.parameters.target-env >>-bronze}"
+              BUCKET="${SCRIPTS_BUCKET:-myproject-<< pipeline.parameters.target-env >>-bronze}"
             fi
             echo "export TARGET_BUCKET=${BUCKET}" >> "$BASH_ENV"
             echo "Uploading to: ${BUCKET}"

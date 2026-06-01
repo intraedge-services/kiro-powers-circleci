@@ -55,7 +55,7 @@ commands:
 ```
 
 ### Context Configuration
-- Create a CircleCI context per environment (e.g., `cos-pipeline-sandbox`, `cos-pipeline-dev`, `cos-pipeline-prod`)
+- Create a CircleCI context per environment (e.g., `myproject-pipeline-sandbox`, `myproject-pipeline-dev`, `myproject-pipeline-prod`)
 - Store `CIRCLECI_ROLE_ARN` and `AWS_REGION` in each context
 - Each context points to a different IAM role with environment-scoped permissions
 
@@ -75,7 +75,7 @@ jobs:
       - run:
           name: CDK synthesize
           working_directory: infrastructure/cdk
-          command: cdk synth -c env=<< pipeline.parameters.cos-env >>
+          command: cdk synth -c env=<< pipeline.parameters.target-env >>
       - persist_to_workspace:
           root: infrastructure/cdk
           paths:
@@ -98,7 +98,7 @@ jobs:
       - run:
           name: CDK deploy
           working_directory: infrastructure/cdk
-          command: cdk deploy -c env=<< pipeline.parameters.cos-env >> --require-approval never --app cdk.out
+          command: cdk deploy -c env=<< pipeline.parameters.target-env >> --require-approval never --app cdk.out
 ```
 
 ### CDK Diff (for PRs)
@@ -107,7 +107,7 @@ jobs:
     name: CDK diff
     working_directory: infrastructure/cdk
     command: |
-      cdk diff -c env=<< pipeline.parameters.cos-env >> 2>&1 | tee cdk-diff.txt
+      cdk diff -c env=<< pipeline.parameters.target-env >> 2>&1 | tee cdk-diff.txt
       echo "CDK_DIFF<<EOF" >> $BASH_ENV
       cat cdk-diff.txt >> $BASH_ENV
       echo "EOF" >> $BASH_ENV
@@ -127,7 +127,7 @@ sandbox → dev → prod
 ### Pipeline Parameters
 ```yaml
 parameters:
-  cos-env:
+  target-env:
     type: string
     default: "sandbox"
   destroy:
@@ -142,7 +142,7 @@ workflows:
   deploy-sandbox:
     when:
       and:
-        - equal: ["sandbox", << pipeline.parameters.cos-env >>]
+        - equal: ["sandbox", << pipeline.parameters.target-env >>]
         - not: << pipeline.parameters.destroy >>
     jobs:
       - quality-gates
@@ -154,7 +154,7 @@ workflows:
     when:
       and:
         - not:
-            equal: ["sandbox", << pipeline.parameters.cos-env >>]
+            equal: ["sandbox", << pipeline.parameters.target-env >>]
         - not: << pipeline.parameters.destroy >>
     jobs:
       - quality-gates
@@ -179,9 +179,9 @@ workflows:
 ### Per-Environment Roles
 | Environment | Role | Permissions |
 |-------------|------|-------------|
-| sandbox | `cos-circleci-sandbox-role` | Full deploy + destroy |
-| dev | `cos-circleci-dev-role` | Deploy only, no destroy |
-| prod | `cos-circleci-prod-role` | Deploy only, restricted resources |
+| sandbox | `circleci-sandbox-deploy-role` | Full deploy + destroy |
+| dev | `circleci-dev-deploy-role` | Deploy only, no destroy |
+| prod | `circleci-prod-deploy-role` | Deploy only, restricted resources |
 
 ### Least Privilege Pattern
 - CDK deploy role: CloudFormation, S3, Glue, Step Functions, IAM (scoped)
@@ -197,7 +197,7 @@ workflows:
     command: |
       cdk deploy --require-approval never --app cdk.out \
         --rollback true \
-        -c env=<< pipeline.parameters.cos-env >>
+        -c env=<< pipeline.parameters.target-env >>
 ```
 
 ### Manual Rollback Workflow
@@ -210,7 +210,7 @@ workflows:
       - hold-rollback:
           type: approval
       - cdk-deploy:
-          context: cos-pipeline-<< pipeline.parameters.cos-env >>
+          context: pipeline-<< pipeline.parameters.target-env >>
           requires: [hold-rollback]
           # Uses previous known-good cdk.out from artifacts
 ```
