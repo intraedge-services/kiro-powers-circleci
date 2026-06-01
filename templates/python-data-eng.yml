@@ -1,0 +1,256 @@
+# Template: Python Data Engineering Pipeline
+# Use this as a starting point for Python/PySpark projects with AWS Glue
+#
+# Features:
+# - Code quality gates (black, flake8, mypy)
+# - Unit tests with PySpark + coverage
+# - Dependency vulnerability scanning
+# - CDK synth + deploy
+# - Glue script upload
+# - Multi-environment promotion with OIDC
+
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1
+
+parameters:
+  target-env:
+    type: string
+    default: "sandbox"
+    description: "Target deployment environment"
+  destroy:
+    type: boolean
+    default: false
+    description: "Set to true to destroy infrastructure"
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.11
+    resource_class: medium
+
+  python-spark:
+    docker:
+      - image: cimg/python:3.11
+    resource_class: large
+    environment:
+      JAVA_HOME: /opt/java
+
+  python-cdk:
+    docker:
+      - image: cimg/python:3.11-node
+    resource_class: medium
+
+commands:
+  aws-oidc-auth:
+    description: "Authenticate to AWS using CircleCI OIDC federation"
+    steps:
+      - aws-cli/setup:
+          role_arn: "${CIRCLECI_ROLE_ARN}"
+          role_session_name: "circleci-${CIRCLE_BUILD_NUM}"
+          region: "${AWS_REGION:-us-east-1}"
+
+  install-python-deps:
+    description: "Install Python dependencies with caching"
+    parameters:
+      extras:
+        type: string
+      cache-key:
+        type: string
+        default: "default"
+    steps:
+      - restore_cache:
+          keys:
+            - pip-v1-<< parameters.cache-key >>-{{ checksum "pyproject.toml" }}
+            - pip-v1-<< parameters.cache-key >>-
+      - run:
+          name: Install dependencies [<< parameters.extras >>]
+          command: |
+            pip install --upgrade pip
+            pip install -e ".[<< parameters.extras >>]"
+      - save_cache:
+          key: pip-v1-<< parameters.cache-key >>-{{ checksum "pyproject.toml" }}
+          paths:
+            - ~/.cache/pip
+            - ~/.local/lib
+
+  install-cdk-cli:
+    description: "Install AWS CDK CLI"
+    steps:
+      - restore_cache:
+          keys:
+            - npm-cdk-v1-
+      - run:
+          name: Install CDK
+          command: sudo npm install -g aws-cdk
+      - save_cache:
+          key: npm-cdk-v1-{{ epoch }}
+          paths:
+            - ~/.npm
+
+jobs:
+  code-quality:
+    executor: python
+    steps:
+      - checkout
+      - install-python-deps:
+          extras: "dev"
+          cache-key: "dev"
+      - run:
+          name: Format check (black)
+          command: black --check src/ tests/
+      - run:
+          name: Lint (flake8)
+          command: flake8 src/ tests/
+      - run:
+          name: Type check (mypy)
+          command: mypy src/
+
+  unit-tests:
+    executor: python-spark
+    parallelism: 2
+    steps:
+      - checkout
+      - run:
+          name: Install JDK 17
+          command: |
+            curl -fsSL "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz" \
+              | sudo tar -xz -C /opt
+            sudo mv /opt/jdk-17.0.13+11 /opt/java
+            echo 'export JAVA_HOME=/opt/java' >> "$BASH_ENV"
+            echo 'export PATH=/opt/java/bin:$PATH' >> "$BASH_ENV"
+      - install-python-deps:
+          extras: "spark,aws,dev"
+          cache-key: "spark"
+      - run:
+          name: Run tests
+          command: |
+            mkdir -p test-results
+            TESTS=$(circleci tests glob "tests/**/*.py" | circleci tests split --split-by=timings)
+            pytest $TESTS -v \
+              --cov=src \
+              --cov-report=term-missing \
+              --cov-report=xml:test-results/coverage.xml \
+              --junitxml=test-results/junit.xml
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+
+  vuln-scan:
+    executor: python
+    steps:
+      - checkout
+      - install-python-deps:
+          extras: "spark,aws,cdk"
+          cache-key: "vuln"
+      - run:
+          name: Dependency vulnerability scan
+          command: |
+            pip install pip-audit
+            pip-audit --desc --progress-spinner=off
+
+  cdk-synth:
+    executor: python-cdk
+    steps:
+      - checkout
+      - install-cdk-cli
+      - install-python-deps:
+          extras: "cdk,aws"
+          cache-key: "cdk"
+      - aws-oidc-auth
+      - run:
+          name: CDK synthesize
+          working_directory: infrastructure/cdk
+          command: cdk synth -c env=<< pipeline.parameters.target-env >>
+      - persist_to_workspace:
+          root: infrastructure/cdk
+          paths:
+            - cdk.out
+
+  cdk-deploy:
+    executor: python-cdk
+    steps:
+      - checkout
+      - install-cdk-cli
+      - install-python-deps:
+          extras: "cdk,aws"
+          cache-key: "cdk"
+      - attach_workspace:
+          at: infrastructure/cdk
+      - aws-oidc-auth
+      - run:
+          name: CDK deploy
+          working_directory: infrastructure/cdk
+          command: |
+            cdk deploy \
+              -c env=<< pipeline.parameters.target-env >> \
+              --require-approval never \
+              --app cdk.out
+
+  glue-upload:
+    executor: python
+    steps:
+      - checkout
+      - aws-oidc-auth
+      - run:
+          name: Upload Glue scripts to S3
+          command: |
+            aws s3 sync src/ "s3://${SCRIPTS_BUCKET}/scripts/src/" \
+              --delete --exclude "__pycache__/*"
+            aws s3 sync config/ "s3://${SCRIPTS_BUCKET}/config/" --delete
+
+workflows:
+  # Auto-deploy for sandbox
+  deploy-sandbox:
+    when:
+      and:
+        - equal: ["sandbox", << pipeline.parameters.target-env >>]
+        - not: << pipeline.parameters.destroy >>
+    jobs:
+      - code-quality
+      - unit-tests
+      - vuln-scan
+      - cdk-synth:
+          context: pipeline-sandbox
+      - cdk-deploy:
+          context: pipeline-sandbox
+          requires:
+            - code-quality
+            - unit-tests
+            - vuln-scan
+            - cdk-synth
+      - glue-upload:
+          context: pipeline-sandbox
+          requires:
+            - cdk-deploy
+
+  # Manual approval for dev/prod
+  deploy-promoted:
+    when:
+      and:
+        - not:
+            equal: ["sandbox", << pipeline.parameters.target-env >>]
+        - not: << pipeline.parameters.destroy >>
+    jobs:
+      - code-quality
+      - unit-tests
+      - vuln-scan
+      - cdk-synth:
+          context: pipeline-<< pipeline.parameters.target-env >>
+      - hold-deploy:
+          type: approval
+          requires:
+            - code-quality
+            - unit-tests
+            - vuln-scan
+            - cdk-synth
+      - cdk-deploy:
+          context: pipeline-<< pipeline.parameters.target-env >>
+          requires:
+            - hold-deploy
+      - glue-upload:
+          context: pipeline-<< pipeline.parameters.target-env >>
+          requires:
+            - cdk-deploy

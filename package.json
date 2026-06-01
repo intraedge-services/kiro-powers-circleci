@@ -1,0 +1,36 @@
+{
+  "name": "kiro-powers-circleci",
+  "displayName": "CircleCI CI/CD Pipeline Management",
+  "version": "1.0.0",
+  "description": "Manage CircleCI pipelines, debug build failures, validate configs, and run pipelines directly from Kiro using the official CircleCI MCP Server. Includes best-practice templates for Python data engineering projects with OIDC, CDK, and Glue workflows.",
+  "keywords": [
+    "circleci",
+    "ci/cd",
+    "pipeline",
+    "continuous integration",
+    "continuous deployment",
+    "build",
+    "test",
+    "deploy",
+    "oidc",
+    "config validation",
+    "flaky tests",
+    "build failures"
+  ],
+  "author": "IntraEdge",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/intraedge-services/kiro-powers-circleci"
+  },
+  "mcpServers": {
+    "circleci": {
+      "command": "npx",
+      "args": ["-y", "@circleci/mcp-server-circleci"],
+      "env": {
+        "CIRCLECI_TOKEN": "${CIRCLECI_TOKEN}",
+        "CIRCLECI_BASE_URL": "https://circleci.com"
+      }
+    }
+  }
+}

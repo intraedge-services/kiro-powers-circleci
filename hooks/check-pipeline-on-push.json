@@ -1,0 +1,12 @@
+{
+  "name": "Check Pipeline Status After Push",
+  "version": "1.0.0",
+  "description": "After the agent completes work, reminds to check CircleCI pipeline status if code was pushed to a remote branch.",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "If code was pushed to a remote branch during this session, use the CircleCI MCP server's get_latest_pipeline_status tool to check the pipeline status. Report the current state. If there are failures, offer to retrieve the failure logs. If no push was made, do nothing."
+  }
+}

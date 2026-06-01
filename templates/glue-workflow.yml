@@ -1,0 +1,108 @@
+# Template: Glue Job Upload Workflow
+# Lightweight pipeline for uploading Glue scripts and configs to S3
+#
+# Use when:
+# - Only Glue scripts changed (no infra changes)
+# - Quick iteration on ETL logic
+# - Deploying config changes
+
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1
+
+parameters:
+  target-env:
+    type: string
+    default: "sandbox"
+  scripts-bucket:
+    type: string
+    default: ""
+    description: "S3 bucket for Glue scripts (overrides env-based default)"
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.11
+    resource_class: small
+
+commands:
+  aws-oidc-auth:
+    steps:
+      - aws-cli/setup:
+          role_arn: "${CIRCLECI_ROLE_ARN}"
+          role_session_name: "circleci-${CIRCLE_BUILD_NUM}"
+          region: "${AWS_REGION:-us-east-1}"
+
+jobs:
+  lint-scripts:
+    executor: python
+    steps:
+      - checkout
+      - run:
+          name: Install linting tools
+          command: |
+            pip install --upgrade pip
+            pip install flake8 black mypy
+      - run:
+          name: Check formatting
+          command: black --check src/
+      - run:
+          name: Lint
+          command: flake8 src/
+
+  upload-glue-scripts:
+    executor: python
+    steps:
+      - checkout
+      - aws-oidc-auth
+      - run:
+          name: Determine target bucket
+          command: |
+            if [ -n "<< pipeline.parameters.scripts-bucket >>" ]; then
+              BUCKET="<< pipeline.parameters.scripts-bucket >>"
+            else
+              BUCKET="${SCRIPTS_BUCKET:-cos-<< pipeline.parameters.target-env >>-bronze}"
+            fi
+            echo "export TARGET_BUCKET=${BUCKET}" >> "$BASH_ENV"
+            echo "Uploading to: ${BUCKET}"
+      - run:
+          name: Upload scripts
+          command: |
+            aws s3 sync src/ "s3://${TARGET_BUCKET}/scripts/src/" \
+              --delete \
+              --exclude "__pycache__/*" \
+              --exclude "*.pyc"
+      - run:
+          name: Upload config
+          command: |
+            aws s3 sync config/ "s3://${TARGET_BUCKET}/config/" --delete
+
+  upload-glue-libs:
+    executor: python
+    steps:
+      - checkout
+      - aws-oidc-auth
+      - run:
+          name: Package and upload shared libraries
+          command: |
+            if [ -d "libs/" ]; then
+              cd libs/
+              zip -r ../shared-libs.zip . -x "__pycache__/*"
+              aws s3 cp ../shared-libs.zip "s3://${TARGET_BUCKET}/libs/shared-libs.zip"
+            else
+              echo "No libs/ directory found, skipping"
+            fi
+
+workflows:
+  upload-scripts:
+    jobs:
+      - lint-scripts
+      - upload-glue-scripts:
+          context: pipeline-<< pipeline.parameters.target-env >>
+          requires:
+            - lint-scripts
+      - upload-glue-libs:
+          context: pipeline-<< pipeline.parameters.target-env >>
+          requires:
+            - lint-scripts
