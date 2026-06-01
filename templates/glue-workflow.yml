@@ -84,6 +84,16 @@ jobs:
       - checkout
       - aws-oidc-auth
       - run:
+          name: Determine target bucket
+          command: |
+            if [ -n "<< pipeline.parameters.scripts-bucket >>" ]; then
+              BUCKET="<< pipeline.parameters.scripts-bucket >>"
+            else
+              BUCKET="${SCRIPTS_BUCKET:-myproject-<< pipeline.parameters.target-env >>-bronze}"
+            fi
+            echo "export TARGET_BUCKET=${BUCKET}" >> "$BASH_ENV"
+            echo "Uploading libs to: ${BUCKET}"
+      - run:
           name: Package and upload shared libraries
           command: |
             if [ -d "libs/" ]; then

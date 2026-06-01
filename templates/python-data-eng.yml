@@ -201,6 +201,20 @@ jobs:
               --delete --exclude "__pycache__/*"
             aws s3 sync config/ "s3://${SCRIPTS_BUCKET}/config/" --delete
 
+  cdk-destroy:
+    executor: python-cdk
+    steps:
+      - checkout
+      - install-cdk-cli
+      - install-python-deps:
+          extras: "cdk,aws"
+          cache-key: "cdk"
+      - aws-oidc-auth
+      - run:
+          name: CDK destroy
+          working_directory: infrastructure/cdk
+          command: cdk destroy -c env=<< pipeline.parameters.target-env >> --force
+
 workflows:
   # Auto-deploy for sandbox
   deploy-sandbox:
@@ -254,3 +268,14 @@ workflows:
           context: pipeline-<< pipeline.parameters.target-env >>
           requires:
             - cdk-deploy
+
+  # Teardown: destroy infrastructure (always requires approval)
+  teardown:
+    when: << pipeline.parameters.destroy >>
+    jobs:
+      - hold-destroy:
+          type: approval
+      - cdk-destroy:
+          context: pipeline-<< pipeline.parameters.target-env >>
+          requires:
+            - hold-destroy
